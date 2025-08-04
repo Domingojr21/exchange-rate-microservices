@@ -92,11 +92,11 @@ public class ExchangeRateService implements IExchangeRateService {
                 // Log individual de cada proveedor
                 apiResponses.forEach(response -> {
                     if (response.successful()) {
-                        LOG.infof("✅ %s: tasa=%s, convertido=%s, tiempo=%dms", 
+                        LOG.infof("%s: tasa=%s, convertido=%s, tiempo=%dms", 
                                  response.provider(), response.rate(), 
                                  response.convertedAmount(), response.responseTimeMs());
                     } else {
-                        LOG.warnf("❌ %s: error=%s, tiempo=%dms", 
+                        LOG.warnf("%s: error=%s, tiempo=%dms", 
                                  response.provider(), response.errorMessage(), response.responseTimeMs());
                     }
                 });
