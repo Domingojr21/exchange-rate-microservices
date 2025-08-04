@@ -1,0 +1,113 @@
+# docker-compose.yml - Sistema Completo de 4 Microservicios
+version: '3.8'
+
+services:
+  # API Provider 1 - Simple Exchange (Puerto 8081)
+  simple-exchange-api:
+    build:
+      context: ./mocks-api/simple-exchange-api
+      dockerfile: src/main/docker/Dockerfile.jvm
+    ports:
+      - "8081:8081"
+    environment:
+      - QUARKUS_HTTP_PORT=8081
+      - QUARKUS_LOG_LEVEL=INFO
+    networks:
+      - exchange-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/q/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # API Provider 2 - XML Exchange (Puerto 8082)
+  xml-exchange-api:
+    build:
+      context: ./mocks-api/xml-exchange-api
+      dockerfile: src/main/docker/Dockerfile.jvm
+    ports:
+      - "8082:8082"
+    environment:
+      - QUARKUS_HTTP_PORT=8082
+      - QUARKUS_LOG_LEVEL=INFO
+    networks:
+      - exchange-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/q/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # API Provider 3 - Advanced Exchange (Puerto 8083)
+  advanced-exchange-api:
+    build:
+      context: ./mocks-api/advanced-exchange-api
+      dockerfile: src/main/docker/Dockerfile.jvm
+    ports:
+      - "8083:8083"
+    environment:
+      - QUARKUS_HTTP_PORT=8083
+      - QUARKUS_LOG_LEVEL=INFO
+    networks:
+      - exchange-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/q/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Servicio Principal - Exchange Rate Main (Puerto 8080)
+  exchange-rate-main:
+    build:
+      context: ./exchange-rate-main
+      dockerfile: src/main/docker/Dockerfile.jvm
+    ports:
+      - "8080:8080"
+    environment:
+      - QUARKUS_HTTP_PORT=8080
+      - QUARKUS_LOG_LEVEL=INFO
+      # URLs de los 3 providers
+      - QUARKUS_REST_CLIENT_SIMPLE_EXCHANGE_CLIENT_URL=http://simple-exchange-api:8081
+      - QUARKUS_REST_CLIENT_XML_EXCHANGE_CLIENT_URL=http://xml-exchange-api:8082
+      - QUARKUS_REST_CLIENT_ADVANCED_EXCHANGE_CLIENT_URL=http://advanced-exchange-api:8083
+    depends_on:
+      simple-exchange-api:
+        condition: service_healthy
+      xml-exchange-api:
+        condition: service_healthy
+      advanced-exchange-api:
+        condition: service_healthy
+    networks:
+      - exchange-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/q/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  exchange-network:
+    driver: bridge
+    name: exchange-rate-network
+
+# Comandos útiles:
+# docker-compose up -d                    # Iniciar todos los servicios
+# docker-compose logs -f exchange-rate-main  # Ver logs del servicio principal
+# docker-compose ps                       # Ver estado de servicios
+# docker-compose down                     # Detener todos los servicios
+
+# URLs de acceso:
+# - Servicio Principal: http://localhost:8080
+# - Simple API: http://localhost:8081
+# - XML API: http://localhost:8082  
+# - Advanced API: http://localhost:8083
+
+# Swagger UIs:
+# - http://localhost:8080/q/swagger-ui (Principal)
+# - http://localhost:8081/q/swagger-ui (Simple)
+# - http://localhost:8082/q/swagger-ui (XML)
+# - http://localhost:8083/q/swagger-ui (Advanced)
