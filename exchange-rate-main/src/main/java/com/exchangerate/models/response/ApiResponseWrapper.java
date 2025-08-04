@@ -4,6 +4,8 @@ import java.io.Serializable;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+import com.exchangerate.utils.ApiResponseConstants;
+
 
 /**
  * Wrapper genérico para estandarizar todas las respuestas de la API.

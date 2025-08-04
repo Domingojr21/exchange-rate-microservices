@@ -1,13 +1,11 @@
 package com.exchangerate.services.implementations;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker;
 import org.eclipse.microprofile.faulttolerance.Retry;
 import org.eclipse.microprofile.faulttolerance.Timeout;
-import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
-import com.exchangerate.clients.SimpleExchangeClient;
-import com.exchangerate.models.dto.api1.SimpleExchangeRequest;
 import com.exchangerate.models.request.ExchangeRateRequest;
 import com.exchangerate.models.response.ApiResponse;
 import com.exchangerate.services.contracts.IExchangeRateProvider;
@@ -15,10 +13,21 @@ import com.exchangerate.utils.CurrencyUtils;
 
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
+
+import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Base64;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Proveedor simple que usa REST Client para conectar con Simple Exchange API.
+ * Proveedor simple que usa HTTP Client para conectar con Simple Exchange API.
  * Especializado en conversiones principales USD/EUR y EUR/USD.
  * 
  * @author Dev. Domingo J. Ruiz
@@ -29,9 +38,19 @@ public class SimpleExchangeProvider implements IExchangeRateProvider {
     private static final Logger LOG = Logger.getLogger(SimpleExchangeProvider.class);
     private static final String PROVIDER_NAME = "SIMPLE_JSON_PROVIDER";
     
-    @Inject
-    @RestClient
-    SimpleExchangeClient simpleExchangeClient;
+    @ConfigProperty(name = "quarkus.rest-client.simple-exchange-client.url")
+    String simpleServiceUrl;
+    
+    @ConfigProperty(name = "api.simple-exchange.path", defaultValue = "/exchange")
+    String simpleServicePath;
+    
+    @ConfigProperty(name = "api.simple.username")
+    String username;
+    
+    @ConfigProperty(name = "api.simple.password")
+    String password;
+    
+    private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Override
     public String getProviderName() {
@@ -48,30 +67,60 @@ public class SimpleExchangeProvider implements IExchangeRateProvider {
         LOG.infof("Llamando a %s para %s a %s, monto: %s", 
                  PROVIDER_NAME, request.sourceCurrency(), request.targetCurrency(), request.amount());
         
-        // Crear request para el microservicio
-        SimpleExchangeRequest simpleRequest = new SimpleExchangeRequest(
+        // Crear el JSON para la solicitud
+        String jsonRequest = String.format(
+            "{\"from\":\"%s\",\"to\":\"%s\",\"value\":%s}",
             request.sourceCurrency(),
-            request.targetCurrency(), 
+            request.targetCurrency(),
             request.amount()
         );
         
-        return simpleExchangeClient.getExchangeRate(simpleRequest)
-            .onItem().transform(response -> {
+        return Uni.createFrom().emitter(emitter -> {
+            try {
+                HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5))
+                    .build();
+                
+                // Crear encabezado de autenticación básica
+                String auth = username + ":" + password;
+                String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+                
+                HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(simpleServiceUrl + simpleServicePath))
+                    .header("Content-Type", MediaType.APPLICATION_JSON)
+                    .header("Accept", MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Basic " + encodedAuth)
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonRequest))
+                    .build();
+                    
+                HttpResponse<String> response = client.send(httpRequest, 
+                    HttpResponse.BodyHandlers.ofString());
+                
+                if (response.statusCode() == 200) {
+                    String jsonResponse = response.body();
+                    
+                    // Analizar respuesta JSON
+                    JsonNode rootNode = objectMapper.readTree(jsonResponse);
+                    BigDecimal rate = new BigDecimal(rootNode.get("rate").asText());
+                    BigDecimal convertedAmount = CurrencyUtils.calculateConvertedAmount(request.amount(), rate);
+                    
+                    long responseTime = System.currentTimeMillis() - startTime;
+                    
+                    LOG.infof("%s éxito: tasa=%s, convertido=%s, tiempo=%dms", 
+                             PROVIDER_NAME, rate, convertedAmount, responseTime);
+                    
+                    emitter.complete(ApiResponse.success(PROVIDER_NAME, rate, convertedAmount, responseTime));
+                } else {
+                    long responseTime = System.currentTimeMillis() - startTime;
+                    String errorMsg = "HTTP error: " + response.statusCode() + " - " + response.body();
+                    LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, errorMsg, responseTime);
+                    emitter.complete(ApiResponse.failure(PROVIDER_NAME, errorMsg, responseTime));
+                }
+            } catch (Exception e) {
                 long responseTime = System.currentTimeMillis() - startTime;
-                var convertedAmount = CurrencyUtils.calculateConvertedAmount(request.amount(), response.rate());
-                
-                LOG.infof("%s éxito: tasa=%s, convertido=%s, tiempo=%dms", 
-                         PROVIDER_NAME, response.rate(), convertedAmount, responseTime);
-                
-                return ApiResponse.success(PROVIDER_NAME, response.rate(), convertedAmount, responseTime);
-            })
-            .onFailure().recoverWithItem(throwable -> {
-                long responseTime = System.currentTimeMillis() - startTime;
-                String errorMsg = throwable.getMessage();
-                
-                LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, errorMsg, responseTime);
-                
-                return ApiResponse.failure(PROVIDER_NAME, errorMsg, responseTime);
-            });
+                LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, e.getMessage(), responseTime);
+                emitter.complete(ApiResponse.failure(PROVIDER_NAME, e.getMessage(), responseTime));
+            }
+        });
     }
 }

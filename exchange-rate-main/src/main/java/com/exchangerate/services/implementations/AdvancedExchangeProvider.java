@@ -1,14 +1,11 @@
 package com.exchangerate.services.implementations;
 
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker;
 import org.eclipse.microprofile.faulttolerance.Retry;
 import org.eclipse.microprofile.faulttolerance.Timeout;
-import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 
-import com.exchangerate.clients.AdvancedExchangeClient;
-import com.exchangerate.models.dto.api3.AdvancedExchangeRequest;
-import com.exchangerate.models.dto.api3.ExchangeDetails;
 import com.exchangerate.models.request.ExchangeRateRequest;
 import com.exchangerate.models.response.ApiResponse;
 import com.exchangerate.services.contracts.IExchangeRateProvider;
@@ -16,10 +13,21 @@ import com.exchangerate.utils.CurrencyUtils;
 
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
+
+import java.math.BigDecimal;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Base64;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
- * Proveedor avanzado que usa REST Client para conectar con Advanced Exchange API.
+ * Proveedor avanzado que usa HTTP Client para conectar con Advanced Exchange API.
  * Especializado en peso dominicano y conversiones emergentes.
  * 
  * @author Dev. Domingo J. Ruiz
@@ -30,9 +38,19 @@ public class AdvancedExchangeProvider implements IExchangeRateProvider {
     private static final Logger LOG = Logger.getLogger(AdvancedExchangeProvider.class);
     private static final String PROVIDER_NAME = "ADVANCED_FINTECH_PROVIDER";
     
-    @Inject
-    @RestClient
-    AdvancedExchangeClient advancedExchangeClient;
+    @ConfigProperty(name = "quarkus.rest-client.advanced-exchange-client.url")
+    String advancedServiceUrl;
+    
+    @ConfigProperty(name = "api.advanced-exchange.path", defaultValue = "/rate")
+    String advancedServicePath;
+    
+    @ConfigProperty(name = "api.advanced.username")
+    String username;
+    
+    @ConfigProperty(name = "api.advanced.password")
+    String password;
+    
+    private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Override
     public String getProviderName() {
@@ -49,36 +67,69 @@ public class AdvancedExchangeProvider implements IExchangeRateProvider {
         LOG.infof("Llamando a %s para %s a %s, monto: %s", 
                  PROVIDER_NAME, request.sourceCurrency(), request.targetCurrency(), request.amount());
         
-        ExchangeDetails exchangeDetails = new ExchangeDetails(
+        // Crear el JSON para la solicitud con estructura anidada
+        String jsonRequest = String.format(
+            "{\"exchange\":{\"sourceCurrency\":\"%s\",\"targetCurrency\":\"%s\",\"quantity\":%s}}",
             request.sourceCurrency(),
-            request.targetCurrency(), 
+            request.targetCurrency(),
             request.amount()
         );
-        AdvancedExchangeRequest advancedRequest = new AdvancedExchangeRequest(exchangeDetails);
         
-        return advancedExchangeClient.getExchangeRate(advancedRequest)
-            .onItem().transform(response -> {
-                long responseTime = System.currentTimeMillis() - startTime;
+        return Uni.createFrom().emitter(emitter -> {
+            try {
+                HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(5))
+                    .build();
                 
-                if (response.statusCode() != 200 || response.data() == null) {
-                    throw new RuntimeException("Invalid response from advanced provider: " + response.message());
+                // Crear encabezado de autenticación básica
+                String auth = username + ":" + password;
+                String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
+                
+                HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(advancedServiceUrl + advancedServicePath))
+                    .header("Content-Type", MediaType.APPLICATION_JSON)
+                    .header("Accept", MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Basic " + encodedAuth)
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonRequest))
+                    .build();
+                    
+                HttpResponse<String> response = client.send(httpRequest, 
+                    HttpResponse.BodyHandlers.ofString());
+                
+                if (response.statusCode() == 200) {
+                    String jsonResponse = response.body();
+                    
+                    // Analizar respuesta JSON anidada
+                    JsonNode rootNode = objectMapper.readTree(jsonResponse);
+                    int statusCode = rootNode.get("statusCode").asInt();
+                    
+                    if (statusCode == 200) {
+                        BigDecimal total = new BigDecimal(rootNode.get("data").get("total").asText());
+                        BigDecimal rate = CurrencyUtils.calculateRate(request.amount(), total);
+                        
+                        long responseTime = System.currentTimeMillis() - startTime;
+                        
+                        LOG.infof("%s éxito: tasa=%s, convertido=%s, tiempo=%dms", 
+                                 PROVIDER_NAME, rate, total, responseTime);
+                        
+                        emitter.complete(ApiResponse.success(PROVIDER_NAME, rate, total, responseTime));
+                    } else {
+                        String message = rootNode.get("message").asText();
+                        long responseTime = System.currentTimeMillis() - startTime;
+                        LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, message, responseTime);
+                        emitter.complete(ApiResponse.failure(PROVIDER_NAME, message, responseTime));
+                    }
+                } else {
+                    long responseTime = System.currentTimeMillis() - startTime;
+                    String errorMsg = "HTTP error: " + response.statusCode() + " - " + response.body();
+                    LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, errorMsg, responseTime);
+                    emitter.complete(ApiResponse.failure(PROVIDER_NAME, errorMsg, responseTime));
                 }
-                
-                var rate = CurrencyUtils.calculateRate(request.amount(), response.data().total());
-                var convertedAmount = response.data().total();
-                
-                LOG.infof("%s éxito: tasa=%s, convertido=%s, tiempo=%dms", 
-                         PROVIDER_NAME, rate, convertedAmount, responseTime);
-                
-                return ApiResponse.success(PROVIDER_NAME, rate, convertedAmount, responseTime);
-            })
-            .onFailure().recoverWithItem(throwable -> {
+            } catch (Exception e) {
                 long responseTime = System.currentTimeMillis() - startTime;
-                String errorMsg = throwable.getMessage();
-                
-                LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, errorMsg, responseTime);
-                
-                return ApiResponse.failure(PROVIDER_NAME, errorMsg, responseTime);
-            });
+                LOG.errorf("%s falló: %s, tiempo=%dms", PROVIDER_NAME, e.getMessage(), responseTime);
+                emitter.complete(ApiResponse.failure(PROVIDER_NAME, e.getMessage(), responseTime));
+            }
+        });
     }
 }

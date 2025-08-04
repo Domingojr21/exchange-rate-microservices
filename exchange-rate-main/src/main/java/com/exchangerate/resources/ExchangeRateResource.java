@@ -3,7 +3,7 @@ package com.exchangerate.resources;
 import org.jboss.logging.Logger;
 
 import com.exchangerate.models.request.ExchangeRateRequest;
-import com.exchangerate.models.response.ApiResponseConstants;
+import com.exchangerate.utils.ApiResponseConstants;
 import com.exchangerate.models.response.ApiResponseWrapper;
 import com.exchangerate.models.response.ExchangeRateResponse;
 import com.exchangerate.services.contracts.IExchangeRateService;

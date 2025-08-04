@@ -1,4 +1,4 @@
-package com.exchangerate.models.response;
+package com.exchangerate.utils;
 
 /**
  * Constantes utilizadas en las respuestas de la API.

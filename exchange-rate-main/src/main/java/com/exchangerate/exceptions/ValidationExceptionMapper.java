@@ -5,7 +5,7 @@ import java.util.stream.Collectors;
 
 import org.jboss.logging.Logger;
 
-import com.exchangerate.models.response.ApiResponseConstants;
+import com.exchangerate.utils.ApiResponseConstants;
 import com.exchangerate.models.response.ApiResponseWrapper;
 
 import jakarta.validation.ConstraintViolation;
