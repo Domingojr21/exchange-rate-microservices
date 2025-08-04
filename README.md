@@ -19,13 +19,26 @@ Un sistema completo de **4 microservicios Quarkus** que simula un ecosistema rea
 ## 🚀 Inicio Rápido
 
 ### 1. Construir todos los proyectos
-```bash
-# En cada directorio:
-cd simple-exchange-api && ./mvnw clean package
-cd ../xml-exchange-api && ./mvnw clean package
-cd ../advanced-exchange-api && ./mvnw clean package
-cd ../exchange-rate-main && ./mvnw clean package
-```
+
+# Paso 1: Construir Simple Exchange API
+cd mocks-api/simple-exchange-api
+mvn clean package
+cd ../..
+
+# Paso 2: Construir XML Exchange API
+cd mocks-api/xml-exchange-api
+mvn clean package
+cd ../..
+
+# Paso 3: Construir Advanced Exchange API
+cd mocks-api/advanced-exchange-api
+mvn clean package
+cd ../..
+
+# Paso 4: Construir el Servicio Principal
+cd exchange-rate-main
+mvn clean package
+cd ..
 
 ### 2. Ejecutar con Docker Compose
 ```bash
