@@ -43,7 +43,7 @@ cd ..
 ### 2. Ejecutar con Docker Compose
 ```bash
 # Desde el directorio raíz
-docker-compose up -d
+docker-compose up --build
 
 # Ver logs
 docker-compose logs -f
