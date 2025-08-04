@@ -74,12 +74,9 @@ services:
       - QUARKUS_REST_CLIENT_XML_EXCHANGE_CLIENT_URL=http://xml-exchange-api:8082
       - QUARKUS_REST_CLIENT_ADVANCED_EXCHANGE_CLIENT_URL=http://advanced-exchange-api:8083
     depends_on:
-      simple-exchange-api:
-        condition: service_healthy
-      xml-exchange-api:
-        condition: service_healthy
-      advanced-exchange-api:
-        condition: service_healthy
+    - simple-exchange-api
+    - xml-exchange-api
+    - advanced-exchange-api
     networks:
       - exchange-network
     healthcheck:
