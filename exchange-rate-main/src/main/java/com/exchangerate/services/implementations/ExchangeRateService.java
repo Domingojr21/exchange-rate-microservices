@@ -61,7 +61,7 @@ public class ExchangeRateService implements IExchangeRateService {
             .map(provider -> {
                 return provider.getExchangeRate(request)
                     .onFailure().recoverWithItem(throwable -> {
-                        // Recuperar graciosamente de cualquier fallo
+                        // Recuperar en caso de cualquier fallo
                         long responseTime = System.currentTimeMillis() - startTime;
                         String errorMsg = translateProviderError(throwable);
                         
